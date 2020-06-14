@@ -1,0 +1,430 @@
+/*         ______   ___    ___ 
+ *        /\  _  \ /\_ \  /\_ \ 
+ *        \ \ \L\ \\//\ \ \//\ \      __     __   _ __   ___ 
+ *         \ \  __ \ \ \ \  \ \ \   /'__`\ /'_ `\/\`'__\/ __`\
+ *          \ \ \/\ \ \_\ \_ \_\ \_/\  __//\ \L\ \ \ \//\ \L\ \
+ *           \ \_\ \_\/\____\/\____\ \____\ \____ \ \_\\ \____/
+ *            \/_/\/_/\/____/\/____/\/____/\/___L\ \/_/ \/___/
+ *                                           /\____/
+ *                                           \_/__/
+ *
+ *      DOS timer module.
+ *
+ *      By Shawn Hargreaves.
+ *
+ *      Accuracy improvements by Neil Townsend.
+ *
+ *      See readme.txt for copyright information.
+ */
+
+#include "allegro.h"
+#include "stdio.h"
+#include "interrupt.h"
+#include "fmxtimer.h"
+#include "../include/allegro/internal/aintern.h"
+#include "../include/allegro/platform/aintdos.h"
+
+/* Error factor for retrace syncing. Reduce this to spend less time waiting
+ * for the retrace, increase it to reduce the chance of missing retraces.
+ */
+#define VSYNC_MARGIN 1024
+
+#define TIMER_INT 8
+
+#define LOVEBILL_TIMER_SPEED BPS_TO_TIMER(200)
+
+#define REENTRANT_RECALL_GAP 2500
+
+static long bios_counter; /* keep BIOS time up to date */
+
+static long timer_delay; /* how long between interrupts */
+
+static int timer_semaphore = FALSE; /* reentrant interrupt? */
+
+static int timer_clocking_loss = 0; /* unmeasured time that gets lost */
+
+static long vsync_counter; /* retrace position counter */
+static long vsync_speed;   /* retrace speed */
+
+/* this driver varies the speed on the fly, which only works in clean DOS */
+int var_timer_init(void);
+void var_timer_exit(void);
+int var_timer_can_simulate_retrace(void);
+void var_timer_simulate_retrace(int enable);
+
+TIMER_DRIVER timedrv_variable_rate =
+	{
+		TIMEDRV_VARIABLE_RATE,
+		"",
+		"",
+		"Variable-rate timer",
+		var_timer_init,
+		var_timer_exit,
+		NULL, NULL, NULL, NULL,
+		var_timer_can_simulate_retrace,
+		var_timer_simulate_retrace,
+		NULL};
+
+/* list the available drivers */
+_DRIVER_INFO _timer_driver_list[] =
+	{
+		{TIMEDRV_VARIABLE_RATE, &timedrv_variable_rate, TRUE},
+		{0, NULL, 0}};
+
+/* set_timer:
+ *  Sets the delay time for PIT channel 0 in one-shot mode.
+ */
+//INLINE
+static void set_timer(long time)
+{
+	// fix
+	// time correction factor. 
+	// code comes from dos which has about a 1MHz (1193181) or something where the foenix is 14MHz. 
+	// times 140 seems to get close to a second count. Need to figure out proper timing.
+	time = time * 120;
+	// outportb(0x43, 0x30);
+	// outportb(0x40, time & 0xff);
+	// outportb(0x40, time >> 8);
+	TIMER0_CHARGE_L = time & 0xFF;
+	TIMER0_CHARGE_M = (time >> 8) & 0xFF;
+	TIMER0_CHARGE_H = (time >> 16) & 0xFF;
+	TIMER0_CMP_L = 0x00;
+	TIMER0_CMP_M = 0x00;
+	TIMER0_CMP_H = 0x00;
+	
+	TIMER0_CMP_REG = TMR_CMP_RELOAD;
+
+	TIMER0_CTRL_REG = TMR_EN | TMR_SLOAD;
+	
+}
+
+/* set_timer_rate:
+ *  Sets the delay time for PIT channel 0 in cycle mode.
+ */
+//INLINE
+static void set_timer_rate(long time)
+{
+	// fix
+	// time correction factor. 
+	// code comes from dos which has about a 1MHz or something where the foenix is 14MHz. 
+	// times 140 seems to get close to a second count. Need to figure out proper timing.
+	time = time * 120;
+	// outportb(0x43, 0x34);
+	// outportb(0x40, time & 0xff);
+	// outportb(0x40, time >> 8);
+
+	TIMER0_CHARGE_L = time & 0xFF;
+	TIMER0_CHARGE_M = (time >> 8) & 0xFF;
+	TIMER0_CHARGE_H = (time >> 16) & 0xFF;
+	TIMER0_CMP_L = 0x00;
+	TIMER0_CMP_M = 0x00;
+	TIMER0_CMP_H = 0x00;
+	
+	TIMER0_CMP_REG = TMR_CMP_RELOAD;
+
+	TIMER0_CTRL_REG = TMR_EN | TMR_SLOAD;
+}
+
+/* read_timer:
+ *  Reads the elapsed time from PIT channel 0.
+ */
+//INLINE
+static long read_timer(void)
+{
+	long x;
+
+	//    outportb(0x43, 0x00);
+	//    x = inportb(0x40);
+	//    x += inportb(0x40) << 8;
+	// Fix most liklely this is incorrect
+	x = TIMER0_CHARGE_L + TIMER0_CHARGE_M + TIMER0_CHARGE_H;
+
+	return (0xFFFF - x + 1) & 0xFFFF;
+}
+
+/* var_timer_handler:
+ *  Interrupt handler for the variable-rate timer driver.
+ */
+static int var_timer_handler(void)
+{
+	long new_delay = 0x8000;
+	int callback[MAX_TIMERS];
+	int bios = FALSE;
+	int x;
+
+	/* reentrant interrupt? */
+	if (timer_semaphore)
+	{
+		timer_delay += REENTRANT_RECALL_GAP + read_timer();
+		set_timer(REENTRANT_RECALL_GAP - timer_clocking_loss / 2);
+		// fix what to do here?
+		//outportb(0x20, 0x20);
+		return 0;
+	}
+
+	timer_semaphore = TRUE;
+
+	/* deal with retrace synchronisation */
+	vsync_counter -= timer_delay;
+
+	if (vsync_counter <= 0)
+	{
+		if (_timer_use_retrace)
+		{
+			/* wait for retrace to start */
+			// fix what to do with retrace stuff?
+			//  do {
+			//  } while (!(inportb(0x3DA)&8));
+
+			//  /* update the VGA pelpan register? */
+			//  if (_retrace_hpp_value >= 0) {
+			//     inportb(0x3DA);
+			//     outportb(0x3C0, 0x33);
+			//     outportb(0x3C0, _retrace_hpp_value);
+			//     _retrace_hpp_value = -1;
+			//  }
+
+			/* user callback */
+			retrace_count++;
+			if (retrace_proc)
+				retrace_proc();
+
+			vsync_counter = vsync_speed - VSYNC_MARGIN;
+		}
+		else
+		{
+			vsync_counter += vsync_speed;
+			retrace_count++;
+			if (retrace_proc)
+				retrace_proc();
+		}
+	}
+
+	if (vsync_counter < new_delay)
+		new_delay = vsync_counter;
+
+	timer_delay += read_timer() + timer_clocking_loss;
+	set_timer(0);
+
+	/* process the user callbacks */
+	for (x = 0; x < MAX_TIMERS; x++)
+	{
+		callback[x] = FALSE;
+
+		if (((_timer_queue[x].proc) || (_timer_queue[x].param_proc)) &&
+			(_timer_queue[x].speed > 0))
+		{
+			_timer_queue[x].counter -= timer_delay;
+
+			if (_timer_queue[x].counter <= 0)
+			{
+				_timer_queue[x].counter += _timer_queue[x].speed;
+				callback[x] = TRUE;
+			}
+
+			if ((_timer_queue[x].counter > 0) && (_timer_queue[x].counter < new_delay))
+				new_delay = _timer_queue[x].counter;
+		}
+	}
+
+	/* update bios time */
+	bios_counter -= timer_delay;
+
+	if (bios_counter <= 0)
+	{
+		bios_counter += 0x10000;
+		bios = TRUE;
+	}
+
+	if (bios_counter < new_delay)
+		new_delay = bios_counter;
+
+	/* fudge factor to prevent interrupts coming too close to each other */
+	if (new_delay < 1024)
+		timer_delay = 1024;
+	else
+		timer_delay = new_delay;
+
+	/* start the timer up again */
+	new_delay = read_timer();
+	set_timer(timer_delay);
+	timer_delay += new_delay;
+
+	//    if (!bios) {
+	//       outportb(0x20, 0x20);      /* ack. the interrupt */
+	//       ENABLE();
+	//    }
+
+	/* finally call the user timer routines */
+	for (x = 0; x < MAX_TIMERS; x++)
+	{
+		if (callback[x])
+		{
+			if (_timer_queue[x].param_proc)
+				_timer_queue[x].param_proc(_timer_queue[x].param);
+			else
+				_timer_queue[x].proc();
+
+			while (((_timer_queue[x].proc) || (_timer_queue[x].param_proc)) &&
+				   (_timer_queue[x].counter <= 0))
+			{
+				_timer_queue[x].counter += _timer_queue[x].speed;
+				if (_timer_queue[x].param_proc)
+					_timer_queue[x].param_proc(_timer_queue[x].param);
+				else
+					_timer_queue[x].proc();
+			}
+		}
+	}
+
+	if (!bios)
+		DISABLE();
+
+	timer_semaphore = FALSE;
+
+	return bios;
+}
+
+/* var_timer_can_simulate_retrace:
+ *  Checks whether it is cool to enable retrace syncing at the moment.
+ */
+int var_timer_can_simulate_retrace(void)
+{
+	// fix
+	// return ((gfx_driver) && ((gfx_driver->id == GFX_VGA) ||
+	// 		    (gfx_driver->id == GFX_MODEX)));
+	return 0;
+}
+
+/* timer_calibrate_retrace:
+ *  Times several vertical retraces, and calibrates the retrace syncing
+ *  code accordingly.
+ */
+static void timer_calibrate_retrace(void)
+{
+	int ot = _timer_use_retrace;
+	int c;
+
+#define AVERAGE_COUNT 4
+
+	_timer_use_retrace = FALSE;
+	vsync_speed = 0;
+
+	/* time several retraces */
+	// for (c = 0; c < AVERAGE_COUNT; c++)
+	// {
+	// 	_enter_critical();
+	// 	_vga_vsync();
+	// 	set_timer(0);
+	// 	_vga_vsync();
+	// 	vsync_speed += read_timer();
+	// 	_exit_critical();
+	// }
+
+	set_timer(timer_delay);
+
+	vsync_speed /= AVERAGE_COUNT;
+
+	/* sanity check to discard bogus values */
+	if ((vsync_speed > BPS_TO_TIMER(40)) || (vsync_speed < BPS_TO_TIMER(110)))
+		vsync_speed = BPS_TO_TIMER(70);
+
+	vsync_counter = vsync_speed;
+	_timer_use_retrace = ot;
+}
+
+/* var_timer_simulate_retrace:
+ *  Turns retrace syncing mode on or off.
+ */
+void var_timer_simulate_retrace(int enable)
+{
+	if (enable)
+	{
+		timer_calibrate_retrace();
+		_timer_use_retrace = TRUE;
+	}
+	else
+	{
+		_timer_use_retrace = FALSE;
+		vsync_counter = vsync_speed = BPS_TO_TIMER(70);
+	}
+}
+
+/* var_timer_init:
+ *  Installs the variable-rate timer driver.
+ */
+int var_timer_init(void)
+{
+	int x, y;
+	char temp;
+	write(5, "timer0\r\n", 8);
+	if (i_love_bill)
+		return -1;
+
+	vsync_counter = vsync_speed = BPS_TO_TIMER(70);
+
+	bios_counter = 0x10000;
+	timer_delay = 0x10000;
+
+	// Assign Timer interrupt.
+	timerInterrupt = &var_timer_handler;
+	// unmask keyboard interrupt
+	temp = INT_MASK_REG0 | 0xFB;
+	INT_MASK_REG0 = temp;
+	//    if (_install_irq(TIMER_INT, var_timer_handler) != 0)
+	//       return -1;
+
+	DISABLE();
+
+	/* now work out how much time calls to the 8254 clock chip take 
+    * on this CPU/motherboard combination. It is impossible to time 
+    * a set_timer call so we approximate it by a read_timer call with 
+    * 4/5ths of a read_timer (no maths and no final read wait). This 
+    * gives 9/10ths of 4 read_timers. Do it three times all over to 
+    * get an averaging effect.
+    */
+	x = read_timer();
+	read_timer();
+	read_timer();
+	read_timer();
+	y = read_timer();
+	read_timer();
+	read_timer();
+	read_timer();
+	y = read_timer();
+	read_timer();
+	read_timer();
+	read_timer();
+	y = read_timer();
+
+	if (y >= x)
+		timer_clocking_loss = y - x;
+	else
+		timer_clocking_loss = 0x10000 - x + y;
+
+	timer_clocking_loss = (9 * timer_clocking_loss) / 30;
+
+	/* sometimes it doesn't seem to register if we only do this once... */
+	for (x = 0; x < 4; x++)
+		set_timer(timer_delay);
+
+	ENABLE();
+
+	return 0;
+}
+
+/* var_timer_exit:
+ *  Shuts down the variable-rate timer driver.
+ */
+void var_timer_exit(void)
+{
+	DISABLE();
+
+	set_timer_rate(0);
+	//fix
+	//_remove_irq(TIMER_INT);
+
+	set_timer_rate(0);
+
+	ENABLE();
+}

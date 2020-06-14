@@ -33,11 +33,11 @@ extern int i_love_bill;
 extern KEYBOARD_DRIVER keydrv_pcdos;
 
 
-// #define TIMEDRV_FIXED_RATE       AL_ID('F','I','X','T')
-// #define TIMEDRV_VARIABLE_RATE    AL_ID('V','A','R','T')
+#define TIMEDRV_FIXED_RATE       AL_ID('F','I','X','T')
+#define TIMEDRV_VARIABLE_RATE    AL_ID('V','A','R','T')
 
-// // TIMER_DRIVER timedrv_fixed_rate;
-// // TIMER_DRIVER timedrv_variable_rate;
+extern TIMER_DRIVER timedrv_fixed_rate;
+extern TIMER_DRIVER timedrv_variable_rate;
 
 
 // #define MOUSEDRV_MICKEYS         AL_ID('M','I','C','K')

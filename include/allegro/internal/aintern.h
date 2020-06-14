@@ -159,29 +159,28 @@ void _reload_config(void);
 
 
 // /* various bits of timer stuff */
-// AL_FUNC(long, _handle_timer_tick, (int interval));
+long _handle_timer_tick (int interval);
 
-// #define MAX_TIMERS      16
+#define MAX_TIMERS      16
 
-// /* list of active timer handlers */
-// typedef struct TIMER_QUEUE
-// {
-//    AL_METHOD(void, proc, (void));      /* timer handler functions */
-//    AL_METHOD(void, param_proc, (void *param));
-//    void *param;                        /* param for param_proc if used */
-//    long speed;                         /* timer speed */
-//    long counter;                       /* counts down to zero=blastoff */
-// } TIMER_QUEUE;
+/* list of active timer handlers */
+typedef struct TIMER_QUEUE
+{
+	void (*proc) (void);	/* timer handler functions */
+	void (*param_proc) (void *param);
+	void *param;	/* param for param_proc if used */
+	long speed;	/* timer speed */
+	long counter;	/* counts down to zero=blastoff */
+} TIMER_QUEUE;
 
-// AL_ARRAY(TIMER_QUEUE, _timer_queue);
+extern TIMER_QUEUE _timer_queue[];
 
-// AL_VAR(int, _timer_installed);
+extern int _timer_installed;
 
-// AL_VAR(int, _timer_use_retrace);
-// AL_VAR(volatile int, _retrace_hpp_value);
+extern int _timer_use_retrace;
+extern volatile int _retrace_hpp_value;
 
-// AL_VAR(long, _vsync_speed);
-
+extern long _vsync_speed;
 
 /* various bits of keyboard stuff */
 void _handle_key_press(int keycode, int scancode);
@@ -191,7 +190,6 @@ extern int _keyboard_installed;
 extern char * _keyboard_common_names[];
 extern volatile char _key[];
 extern volatile int _key_shifts;
-
 
 // #if (defined ALLEGRO_DOS) || (defined ALLEGRO_DJGPP) || (defined ALLEGRO_WATCOM) || \
 //     (defined ALLEGRO_QNX) || (defined ALLEGRO_BEOS)

@@ -635,7 +635,7 @@ int install_keyboard(void)
 //       driver_list = system_driver->keyboard_drivers();
 //    else
       driver_list = _keyboard_driver_list;
-write(4, "test2", 5);
+
    for (i=0; driver_list[i].driver; i++) {
       keyboard_driver = driver_list[i].driver;
 	  //fix config loading
@@ -643,16 +643,16 @@ write(4, "test2", 5);
       if (keyboard_driver->init() == 0)
 	 break;
    }
-write(4, "test3", 5);
+
    if (!driver_list[i].driver) {
       keyboard_driver = NULL;
       return -1;
    }
-write(4, "test4", 5);
+
    keyboard_polled = (keyboard_driver->poll) ? TRUE : FALSE;
 
    set_leds(-1);
-write(4, "test5", 5);
+
 	//fix
    //_add_exit_func(remove_keyboard, "remove_keyboard");
    _keyboard_installed = TRUE;
@@ -660,9 +660,9 @@ write(4, "test5", 5);
 	// fix autorepeat once we have timers
    //if ((keyboard_driver->autorepeat) && (!_timer_installed))
    //   install_timer();
-write(4, "test6", 5);
+
    update_shifts();
-write(4, "test7", 5);
+
    return 0;
 }
 

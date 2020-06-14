@@ -22,8 +22,11 @@
 #ifndef ALLEGRO_H
 #define ALLEGRO_H
 
-/* helper declarations */
+/* helper and fix declarations */
 char *f_strdup(char *src);
+
+extern void (*retrace_proc) (void);
+
 
 #include "allegro/base.h"
 
@@ -33,7 +36,7 @@ char *f_strdup(char *src);
 // #include "allegro/unicode.h"
 
 // #include "allegro/mouse.h"
-// #include "allegro/timer.h"
+#include "allegro/timer.h"
 #include "allegro/keyboard.h"
 // #include "allegro/joystick.h"
 

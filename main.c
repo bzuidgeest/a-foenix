@@ -1,6 +1,6 @@
 #include <fcntl.h>
 #include <stdio.h>
-#include <stdlib.h> 
+#include <stdlib.h>
 #include <sys/types.h>
 #include "../foenixLibrary/mytypes.h"
 #include "../foenixLibrary/vicky.h"
@@ -9,8 +9,11 @@
 
 #include "include/allegro.h"
 
-void *heap_start = (void * )0x190000, *heap_end = (void * )0x240000;
+// Take 14318180 and divide by the frequency you wish. So, 14318180 / 50 = 286360
 
+void *heap_start = (void *)0x190000, *heap_end = (void *)0x240000;
+
+int i_love_bill = 0;
 
 #define UART1 (*(unsigned char *)0xAF13F8)
 #define UART1X (*(unsigned char *)0xAF13FD)
@@ -21,13 +24,12 @@ char spinner[] = {'|', '/', '-', '\\', '|', '/', '-', '\\'};
 char spinnerState = 0;
 int reg = 0;
 
-void IRQHandler(void)              
-{          
-	
+void IRQHandler(void)
+{
 
 	// if (reg = (INT_PENDING_REG0 & FNX0_INT02_TMR0))
 	// {
-		
+
 	// 	textScreen[6] = spinner[spinnerState];
 	// 	if (spinnerState < 7)
 	// 		spinnerState++;
@@ -40,11 +42,11 @@ void IRQHandler(void)
 
 	// 	reg = INT_PENDING_REG0 & FNX0_INT02_TMR0;
 	// 	INT_PENDING_REG0 = reg;
-	// }   
+	// }
 
 	// if (reg = (INT_PENDING_REG3 & FNX3_INT02_IDE))
 	// {
-		
+
 	// 	textScreen[10] = spinner[spinnerStateDisk];
 	// 	if (spinnerStateDisk < 7)
 	// 		spinnerStateDisk++;
@@ -57,7 +59,7 @@ void IRQHandler(void)
 
 	// 	reg = INT_PENDING_REG3 & INT_PENDING_REG3;
 	// 	INT_PENDING_REG3 = reg;
-	// }   
+	// }
 	textScreen[10] = spinner[spinnerState];
 	if (spinnerState < 7)
 		spinnerState++;
@@ -66,45 +68,80 @@ void IRQHandler(void)
 		spinnerState = 0;
 	}
 
+	if (reg = (INT_PENDING_REG0 & FNX0_INT02_TMR0))
+	{
+		// if ((*timerInterrupt) != NULL)
+		(*timerInterrupt)();
+
+		reg = INT_PENDING_REG0 & FNX0_INT02_TMR0;
+		INT_PENDING_REG0 = reg;
+	}
+
 	if (reg = (INT_PENDING_REG1 & FNX1_INT00_KBD))
 	{
-		
-		
-
 		//printf("interrupt %d\n", (*keyInterrupt)());
 		(*keyInterrupt)();
 		//textScreen[15] = (*(volatile unsigned char *)0xAF1060);
 
 		reg = INT_PENDING_REG1 & FNX1_INT00_KBD;
 		INT_PENDING_REG1 = reg;
-	}   
+	}
 
 	//(*keyInterrupt)();
 
-	//printf("interrupt");
+	//printf("interrupt\n");
 }
 
-void COPHandler(void)              
-{             
+void COPHandler(void)
+{
 	printf("COP");
 }
 
-void BRKHandler(void)              
-{             
+void BRKHandler(void)
+{
 	printf("break");
-	while(1) {};
+	while (1)
+	{
+	};
 }
+
+/* timer example */
+
+/* these must be declared volatile so the optimiser doesn't mess up */
+volatile int p = 0;
+volatile int y = 0;
+volatile int z = 0;
+
+/* timer interrupt handler */
+void inc_x(void)
+{
+	p++;
+}
+
+/* timer interrupt handler */
+void inc_y(void)
+{
+	y++;
+}
+
+/* timer interrupt handler */
+void inc_z(void)
+{
+	z++;
+}
+
+/* end of timer example */
 
 int main()
 {
 	char buf[128];
-	int k;
+	int k, zold;
 	char temp;
 	//if (allegro_init() != 0)
 	//return 1;
-	
+
 	install_keyboard();
-	// install_timer();
+	install_timer();
 
 	// if (set_gfx_mode(GFX_AUTODETECT, 640, 480, 0, 0) != 0) {
 	// if (set_gfx_mode(GFX_SAFE, 640, 480, 0, 0) != 0) {
@@ -121,13 +158,22 @@ int main()
 	COLS_PER_LINE = 80;
 	LINES_MAX = 60;
 	//set the visible display size - 80 x 60
-  	COLS_VISIBLE = 80;
+	COLS_VISIBLE = 80;
 	LINES_VISIBLE = 60;
 
 	//INT_MASK_REG3 = 0xFB; // unmask harddisk;
+	
+	//INT_MASK_REG0 = 0xFF;
+	//INT_MASK_REG1 = 0xFE; // Unmask keyboard
 
-	INT_MASK_REG0 = 0xFF;
-	INT_MASK_REG1 = 0xFE; // Unmask keyboard
+	/* the speed can be specified in milliseconds (this is once a second) */
+	install_int(inc_x, 1000);
+
+	/* or in beats per second (this is 10 ticks a second) */
+	install_int_ex(inc_y, BPS_TO_TIMER(10));
+
+	/* or in seconds (this is 10 seconds a tick) */
+	install_int_ex(inc_z, SECS_TO_TIMER(10));
 
 	// enable interrupts
 	enableInterrupts();
@@ -140,83 +186,85 @@ int main()
 
 	BORDER_X_SIZE = 0;
 	BORDER_Y_SIZE = 0;
-    // Create the stack
+	// Create the stack
 
-    // Clear variables
-    //memset(variableStack, 0, 512 * 15);
+	// Clear variables
+	//memset(variableStack, 0, 512 * 15);
 	//write(0, "xxxxxxxxxxxxxxx", 10);
-	while(1)
+	printf("Driver: %s\n",timer_driver->ascii_name);
+	INT_MASK_REG0 = 0xFB; //timer0
+	printf("mask0 %d\n", INT_MASK_REG0);
+
+
+	while (1)
 	{
-		// set text
-	// textScreen[0] = 'H';
-	// textScreen[1] = 'e';
-	// textScreen[2] = 'l';
-	// textScreen[3] = 'l';
-	// textScreen[4] = 'o';
+		if (z != zold)
+		{
+			zold = z;
+			temp = sprintf(buf, "p=%d, y=%d, z=%d\n", p, y, z);
+			write(0, buf, temp);
+		}
+		
 		if (keypressed() == 1)
 		{
 			k = readkey();
 
 			// if ((k & 0xff) == 'd')     /* by ASCII code */
-	 		// 	printf("You pressed '%c'\n", (k & 0xff));
+			// 	printf("You pressed '%c'\n", (k & 0xff));
 			// else
 			// {
 			// 	printf("You pressed something else '%c'\n", (k & 0xff));
 			// }
 			// printf ("%c\n", (k & 0xff));
-			buf[0] = (k & 0xff);
-			write(0, buf, 1);
-			
+			temp = sprintf(buf, "p=%d, y=%d, z=%d\n", p, y, z);
+			write(0, buf, temp);
+			//buf[0] = (k & 0xff);
+			//write(0, buf, 1);
 		}
-	
-	// textScreen[5] = 'W'; 
-	// textScreen[6] = 'o';
-	// textScreen[7] = 'r';
-	// textScreen[8] = 'l';
-	// textScreen[9] = 'd';
 	}
-
-} 
-
-
-
-
+}
 
 /* printf functions */
 
-void _abort(void) {
-
+void _abort(void)
+{
 }
 
-int close(int fd) {
-    return 0;
+int close(int fd)
+{
+	return 0;
 }
 
-int creat(const char *_name, int _mode) {
-    return 0;
+int creat(const char *_name, int _mode)
+{
+	return 0;
 }
 
-
-long lseek(int fd, long pos, int rel) {
-    return 0;
+long lseek(int fd, long pos, int rel)
+{
+	return 0;
 }
 
-int open(const char * _name, int _mode) {
-    return 0;
+int open(const char *_name, int _mode)
+{
+	return 0;
 }
 
-size_t read(int fd, void *buffer, size_t len) {
-    return 0;
+size_t read(int fd, void *buffer, size_t len)
+{
+	return 0;
 }
 
-int unlink(const char *filename) {
-    return 0;
+int unlink(const char *filename)
+{
+	return 0;
 }
 
-size_t write(int fd, void *buffer, size_t len) {
-    size_t count;
+size_t write(int fd, void *buffer, size_t len)
+{
+	size_t count;
 
-	if(fd < 3)
+	if (fd < 3)
 	{
 		for (count = 0; count < len; count++)
 		{
@@ -234,21 +282,21 @@ size_t write(int fd, void *buffer, size_t len) {
 			}
 
 			textScreen[(0x80 * VKY_TXT_CURSOR_Y_REG) + VKY_TXT_CURSOR_X_REG] = ((unsigned char *)buffer)[count];
-			
+
 			//textScreenColor[(0x80 * VKY_TXT_CURSOR_Y_REG) + VKY_TXT_CURSOR_X_REG] = 0xE0;
 			/*
 			textScreenColor[(0x80 * VKY_TXT_CURSOR_Y_REG) + VKY_TXT_CURSOR_X_REG] = color;
 			color += 16;
 			if (color == 0xF0)
 				color = 0x10;*/
-			
+
 			VKY_TXT_CURSOR_X_REG++;
-			
+
 			if (VKY_TXT_CURSOR_X_REG == COLS_VISIBLE)
 			{
 				VKY_TXT_CURSOR_X_REG = 0;
 				VKY_TXT_CURSOR_Y_REG++;
-				
+
 				if (VKY_TXT_CURSOR_Y_REG == LINES_VISIBLE)
 				{
 					VKY_TXT_CURSOR_Y_REG = 0;
@@ -264,22 +312,23 @@ size_t write(int fd, void *buffer, size_t len) {
 		// }
 		for (count = 0; count < len; count++)
 		{
-			while(!(UART1X & 0x20))
+			while (!(UART1X & 0x20))
 			{
 			}
 			UART1 = ((unsigned char *)buffer)[count];
 		}
 	}
-	
-    return len;
+
+	return len;
 }
 
 //
 // Missing STDLIB.H function
 //
-int    isatty(int fd) {
-    // descriptors 0, 1 and 2 are STDIN_FILENO, STDOUT_FILENO and STDERR_FILENO
-    return fd < 3;
+int isatty(int fd)
+{
+	// descriptors 0, 1 and 2 are STDIN_FILENO, STDOUT_FILENO and STDERR_FILENO
+	return fd < 3;
 }
 
 /* end of printf functions */
@@ -291,16 +340,16 @@ https://stackoverflow.com/questions/37132549/implementation-of-strdup-in-c-progr
 */
 char *f_strdup(char *src)
 {
-    char *str;
-    char *p;
-    int len = 0;
+	char *str;
+	char *p;
+	int len = 0;
 
-    while (src[len])
-        len++;
-    str = malloc(len + 1);
-    p = str;
-    while (*src)
-        *p++ = *src++;
-    *p = '\0';
-    return str;
+	while (src[len])
+		len++;
+	str = malloc(len + 1);
+	p = str;
+	while (*src)
+		*p++ = *src++;
+	*p = '\0';
+	return str;
 }

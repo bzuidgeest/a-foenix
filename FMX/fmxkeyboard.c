@@ -240,9 +240,9 @@ static int pcdos_key_init(void)
 {
 	char temp;
    //int s1, s2, s3;
-write(4, "init1", 5);
+
    _pckeys_init();
-  write(4, "init4", 5); 
+
    /* read the current BIOS keyboard state */
 //    while (kbhit())
 //       simulate_keypress(getch());
@@ -267,7 +267,7 @@ write(4, "init1", 5);
 //    if (s1 & 64) _key_shifts |= KB_CAPSLOCK_FLAG;
 
 //    key_shifts = _key_shifts;
-write(4, "init7", 5);
+
 	// Assign keyboard interrupt.
 	keyInterrupt = &keyint;
 	// unmask keyboard interrupt
@@ -275,9 +275,9 @@ write(4, "init7", 5);
 	INT_MASK_REG1 = temp;
 
    //_install_irq(KEYBOARD_INT, keyint);
-write(4, "init8", 5);
+
    pcdos_set_leds(_key_shifts);
-write(4, "init9", 5);
+
    return 0;
 }
 

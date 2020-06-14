@@ -118,6 +118,7 @@ extern _DRIVER_INFO _system_driver_list[];
 
 
 extern int (*keyInterrupt)(void);
+extern int (*timerInterrupt)(void);
 
 //#include "inline/system.inl"
 
